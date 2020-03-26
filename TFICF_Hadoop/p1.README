@@ -1,0 +1,45 @@
+vkarri Vivek Reddy Karri
+
+The Problem of TF-ICF was implemented as three separate and sequential Map-Reduce Jobs namely WordCount Job, DocSize Job and TFICF jobs.
+For Every Job, Corresponding Mapper Class and Reducer Class are defined.
+
+A) Word Count Job:
+Mapper (WCMapper Class)
+  - The map method of this class expects the inputs to be of format (byte offset, contents of the corresponding line).
+  - So, the map method processes one line at a time. The line is tokenized considering whitespace as the delimitter.
+  - Then, text cleaning is done on the words. Following cleaning steps have been taken:
+    0) First, all the words are converted to lower case.
+    1) Characters such as [, ' ? " : ( ) { } = ! etc were removed.
+    2) Only the words starting with [a-z] have been processed further
+  -Then, Each tokenized and processed word is then emitted by the map function of the format <<word@document,1>>
+
+Reducer (WCReducer Class)
+  - The reduce method of this class expects the key of format word@document and an iterable associated.
+  - The Iterable essentially has all the values associated with the same key generated at the map end.
+  - Then all the values in the iterable are reduced by (+) op which is essentially count of each word@document.
+  - The output is written back to file system i.e. of format <<word@document, "respective count">>
+
+B) DocSize Job:
+Mapper (DSMapper Class)
+  - The map method of this class expects follows the same line as the WCMapper class i.e the inputs to be of format (byte offset, contents of the corresponding line).
+  - Since, we have to compute Docsize i.e. the computation is document centric for the reduce part and as such the key is changed to be document.
+  - Essentially, <(word@document) , wordCount> is converted to <document , (word=wordCount)>
+
+Reducer (DSReducer Class)
+  - The reduce method of the class expects the document as a key and an iterable associated with it containing all the words and their counts in the format word=wordCount.
+  - The wordCount for all the words are summed up to find the docSize i.e total number of words in the document.
+  - Initially a map is created and the word and wordCount information is stored in the map with word being the key and this is done while a global variable keep tracking of docSize.
+  - Then re-iterated through the map emitting (word@document), (wordCount/docSize).
+  - This method's output is written back to the filesystem in the format ( (word@document) , (wordCount/docSize) )
+
+C) TFICF Job:
+Mapper (TFICFMapper CLass)
+  - Now that we have the information of wordCount and Docsize, the computation of TFICF requires the information of number of docs with a particular word.
+  - So , to accomodate this the key has been changed to the word, i.e the input of format <(word@document) , (wordCount/docSize)> has been modified to (word, (document=wordCount/docSize) )
+  - Basic Splitting of the text field into three parts and respctive combination into the output was all this map is about.
+
+Reducer (TFICFReducer class)
+  - The reduce method expects The reduce method of the class expects the document as a key and an iterable associated with it containing the info about (document=wordCount/docSize).
+  - A map is created to store this information with the document as key and wordCount/docSize as the value, while looping over the iterable and storing the information about numDocsWithWord.
+  - Next we loop over the keys to the map to compute tf (wordCount/docSize + 1) and icf ((numDocs + 1)/(numDocsWithWord +1)).
+  - The final TF-ICF score is computed for every word and is written back to the file system.
