@@ -92,16 +92,6 @@ public class TFICF {
 		 * Map:    ( (word@document) , (1/docSize) )
 		 * Reduce: ( (word@document) , (wordCount/docSize) )
 		 */
-
-		 // mapValues(
-			//  new Function<Tuple2<String,Integer>,String>() {
-			// 	 public String call(Tuple2<String,Integer> x) {
-			// 		 String ret = Integer.toString(x._2);
-			// 		 ret = "1/"+ret;
-			// 		 return ret;
-			// 	 }
-			//  }
-		 // )
 			JavaPairRDD<String,String> tfRDD = wordsRDD.groupByKey().mapValues(
 			 new Function<Iterable<Integer>, String>() {
 					public String call(Iterable<Integer> x) {
@@ -127,97 +117,138 @@ public class TFICF {
 				}
 				System.out.println("--------------------------------");
 			}
-//
-// 		/*
-// 		 * ICF Job
-// 		 * Gathers all data needed for ICF calculation from tfRDD
-// 		 *
-// 		 * Input:  ( (word@document) , (wordCount/docSize) )
-// 		 * Map:    ( word , (1/document) )
-// 		 * Reduce: ( word , (numDocsWithWord/document1,document2...) )
-// 		 * Map:    ( (word@document) , (numDocs/numDocsWithWord) )
-// 		 */
-// /*
-// 		JavaPairRDD<String,String> icfRDD = tfRDD./**MAP**/(
-//
-// 			/************ YOUR CODE HERE ************/
-//
-// 		)./**REDUCE**/(
-//
-// 			/************ YOUR CODE HERE ************/
-//
-// 		)./**MAP**/(
-//
-// 			/************ YOUR CODE HERE ************/
-//
-// 		);
-//
-// 		//Print icfRDD contents
-// 		if (DEBUG) {
-// 			List<Tuple2<String, String>> list = icfRDD.collect();
-// 			System.out.println("-------Contents of icfRDD-------");
-// 			for (Tuple2<String, String> tuple : list) {
-// 				System.out.println("(" + tuple._1 + ") , (" + tuple._2 + ")");
-// 			}
-// 			System.out.println("--------------------------------");
-// 		}
-//
-// 		/*
-// 		 * TF * ICF Job
-// 		 * Calculates final TFICF value from tfRDD and icfRDD
-// 		 *
-// 		 * Input:  ( (word@document) , (wordCount/docSize) )          [from tfRDD]
-// 		 * Map:    ( (word@document) , TF )
-// 		 *
-// 		 * Input:  ( (word@document) , (numDocs/numDocsWithWord) )    [from icfRDD]
-// 		 * Map:    ( (word@document) , ICF )
-// 		 *
-// 		 * Union:  ( (word@document) , TF )  U  ( (word@document) , ICF )
-// 		 * Reduce: ( (word@document) , TFICF )
-// 		 * Map:    ( (document@word) , TFICF )
-// 		 *
-// 		 * where TF    = log( wordCount/docSize + 1 )
-// 		 * where ICF   = log( (Total numDocs in the corpus + 1) / (numDocsWithWord in the corpus + 1) )
-// 		 * where TFICF = TF * ICF
-// 		 */
-// 		JavaPairRDD<String,Double> tfFinalRDD = tfRDD.mapToPair(
-// 			new PairFunction<Tuple2<String,String>,String,Double>() {
-// 				public Tuple2<String,Double> call(Tuple2<String,String> x) {
-// 					double wordCount = Double.parseDouble(x._2.split("/")[0]);
-// 					double docSize = Double.parseDouble(x._2.split("/")[1]);
-// 					double TF = wordCount/docSize;
-// 					return new Tuple2(x._1, TF);
-// 				}
-// 			}
-// 		);
-//
-// 		JavaPairRDD<String,Double> idfFinalRDD = idfRDD./**MAP**/(
-//
-// 			/************ YOUR CODE HERE ************/
-//
-// 		);
-//
-// 		JavaPairRDD<String,Double> tficfRDD = tfFinalRDD.union(idfFinalRDD)./**REDUCE**/(
-//
-// 			/************ YOUR CODE HERE ************/
-//
-// 		)./**MAP**/(
-//
-// 			/************ YOUR CODE HERE ************/
-//
-// 		);
-//
-// 		//Print tficfRDD contents in sorted order
-// 		Map<String, Double> sortedMap = new TreeMap<>();
-// 		List<Tuple2<String, Double>> list = tficfRDD.collect();
-// 		for (Tuple2<String, Double> tuple : list) {
-// 			sortedMap.put(tuple._1, tuple._2);
-// 		}
-// 		if(DEBUG) System.out.println("-------Contents of tficfRDD-------");
-// 		for (String key : sortedMap.keySet()) {
-// 			System.out.println(key + "\t" + sortedMap.get(key));
-// 		}
-// 		if(DEBUG) System.out.println("--------------------------------");
+
+		/*
+		 * ICF Job
+		 * Gathers all data needed for ICF calculation from tfRDD
+		 *
+		 * Input:  ( (word@document) , (wordCount/docSize) )
+		 * Map:    ( word , (1/document) )
+		 * Reduce: ( word , (numDocsWithWord/document1,document2...) )
+		 * Map:    ( (word@document) , (numDocs/numDocsWithWord) )
+		 */
+
+		JavaPairRDD<String,String> icfRDD = tfRDD.flatMapToPair(
+			new PairFlatMapFunction<Tuple2<String,String>,String,String>() {
+				public Iterable<Tuple2<String,String>> call(Tuple2<String,String> x) {
+					// Collect data attributes
+					String[] wordAndDoc = x._1.split("@");
+
+					// Output to Arraylist
+					ArrayList ret = new ArrayList();
+					ret.add(new Tuple2(wordAndDoc[0], wordAndDoc[1]));
+					return ret;
+				}
+			}
+		).groupByKey().flatMapToPair(
+			new PairFlatMapFunction<Tuple2<String,Iterable<String>>,String,String>() {
+				public Iterable<Tuple2<String,String>> call(Tuple2<String,Iterable<String>> x) {
+					int numDocsWithWord = 0;
+					Map<String, String> TEMPMap = new HashMap<String, String>();
+					String word = x._1;
+
+					ArrayList<String> docs = new ArrayList<String>();
+
+					for (String doc : x._2){ // Loop over all the Iterable and compute totalWords .
+              numDocsWithWord += 1;
+							docs.add(doc);
+          }
+
+					Iterator i = docs.iterator();
+          ArrayList ret = new ArrayList();
+          while (i.hasNext()) {
+						   String doc = (String)i.next();
+            	 ret.add(new Tuple2(word+"@"+doc, Long.toString(numDocs)+"/"+Long.toString(numDocsWithWord)));
+          }
+					return ret;
+				}
+			}
+		);
+
+		//Print icfRDD contents
+		if (DEBUG) {
+			List<Tuple2<String, String>> list = icfRDD.collect();
+			System.out.println("-------Contents of icfRDD-------");
+			for (Tuple2<String, String> tuple : list) {
+				System.out.println("(" + tuple._1 + ") , (" + tuple._2 + ")");
+			}
+			System.out.println("--------------------------------");
+		}
+
+		/*
+		 * TF * ICF Job
+		 * Calculates final TFICF value from tfRDD and icfRDD
+		 *
+		 * Input:  ( (word@document) , (wordCount/docSize) )          [from tfRDD]
+		 * Map:    ( (word@document) , TF )
+		 *
+		 * Input:  ( (word@document) , (numDocs/numDocsWithWord) )    [from icfRDD]
+		 * Map:    ( (word@document) , ICF )
+		 *
+		 * Union:  ( (word@document) , TF )  U  ( (word@document) , ICF )
+		 * Reduce: ( (word@document) , TFICF )
+		 * Map:    ( (document@word) , TFICF )
+		 *
+		 * where TF    = log( wordCount/docSize + 1 )
+		 * where ICF   = log( (Total numDocs in the corpus + 1) / (numDocsWithWord in the corpus + 1) )
+		 * where TFICF = TF * ICF
+		 */
+		JavaPairRDD<String,Double> tfFinalRDD = tfRDD.mapToPair(
+			new PairFunction<Tuple2<String,String>,String,Double>() {
+				public Tuple2<String,Double> call(Tuple2<String,String> x) {
+					double wordCount = Double.parseDouble(x._2.split("/")[0]);
+					double docSize = Double.parseDouble(x._2.split("/")[1]);
+					double TF = Math.log(wordCount/docSize + 1);
+					return new Tuple2(x._1, TF);
+				}
+			}
+		);
+
+		JavaPairRDD<String,Double> icfFinalRDD = icfRDD.mapToPair(
+			new PairFunction<Tuple2<String,String>,String,Double>() {
+				public Tuple2<String,Double> call(Tuple2<String,String> x) {
+					double numDocs = Double.parseDouble(x._2.split("/")[0]);
+					double numDocsWithWord = Double.parseDouble(x._2.split("/")[1]);
+					double ICF = Math.log((numDocs+1)/(numDocsWithWord+1));
+					return new Tuple2(x._1, ICF);
+				}
+			}
+		);
+
+		Function2<Double, Double, Double> reduceMultiplyFunc = (tf, icf) -> (tf*icf);
+
+		JavaPairRDD<String,Double> tficfRDD = tfFinalRDD.union(icfFinalRDD).reduceByKey(reduceMultiplyFunc).flatMapToPair(
+			new PairFlatMapFunction<Tuple2<String,Double>,String,Double>() {
+				public Iterable<Tuple2<String,Double>> call(Tuple2<String,Double> x) {
+
+					String[] wordAndDoc = x._1.split("@");
+
+					ArrayList ret = new ArrayList();
+					ret.add(new Tuple2(wordAndDoc[1]+"@"+wordAndDoc[0], x._2));
+					return ret;
+				}
+			}
+			);
+
+		// System.out.println("-------Contents of RDD-------");
+		// tfFinalRDD.foreach((str) -> System.out.println(str));
+		// System.out.println("-------Contents of icfRDD-----");
+		// icfFinalRDD.foreach((str) -> System.out.println(str));
+		// System.out.println("-------Contents of tficfRDD-----");
+		// tficfRDD.foreach((str) -> System.out.println(str));
+
+
+		//Print tficfRDD contents in sorted order
+		Map<String, Double> sortedMap = new TreeMap<>();
+		List<Tuple2<String, Double>> list = tficfRDD.collect();
+		for (Tuple2<String, Double> tuple : list) {
+			sortedMap.put(tuple._1, tuple._2);
+		}
+		if(DEBUG) System.out.println("-------Contents of tficfRDD-------");
+		for (String key : sortedMap.keySet()) {
+			System.out.println(key + "\t" + sortedMap.get(key));
+		}
+		if(DEBUG) System.out.println("--------------------------------");
 
 	}
 }
