@@ -1,3 +1,8 @@
+/*
+Single Author Info
+vkarri Vivek Reddy Karri
+*/
+
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -14,7 +19,7 @@ import java.util.*;
  */
 public class TFICF {
 
-	static boolean DEBUG = true;
+	static boolean DEBUG = false;
 
     public static void main(String[] args) throws Exception {
         // Check for correct usage
@@ -92,17 +97,23 @@ public class TFICF {
 		 * Map:    ( (word@document) , (1/docSize) )
 		 * Reduce: ( (word@document) , (wordCount/docSize) )
 		 */
+
 			JavaPairRDD<String,String> tfRDD = wordsRDD.groupByKey().mapValues(
 			 new Function<Iterable<Integer>, String>() {
 					public String call(Iterable<Integer> x) {
+
+						 // Variable to count Wordcount
 						 int wordCount = 0;
+
+						 //Varible to store docSize
 						 int res = 0;
 
 		    		 for (Integer val : x) {
 							 res = val.intValue();
-		    		   wordCount += 1;
+		    		   wordCount += 1; // Increment WordCount
 		    		 }
 
+						 //returns the string in the format (wordCount/docSize)
 						 return Integer.toString(wordCount)+"/"+Integer.toString(res);
 					}
 				}
@@ -131,11 +142,13 @@ public class TFICF {
 		JavaPairRDD<String,String> icfRDD = tfRDD.flatMapToPair(
 			new PairFlatMapFunction<Tuple2<String,String>,String,String>() {
 				public Iterable<Tuple2<String,String>> call(Tuple2<String,String> x) {
-					// Collect data attributes
+					// Split word@document into [word, document]
 					String[] wordAndDoc = x._1.split("@");
 
 					// Output to Arraylist
 					ArrayList ret = new ArrayList();
+
+				  // Return a tuple of (document, word)
 					ret.add(new Tuple2(wordAndDoc[0], wordAndDoc[1]));
 					return ret;
 				}
@@ -143,19 +156,25 @@ public class TFICF {
 		).groupByKey().flatMapToPair(
 			new PairFlatMapFunction<Tuple2<String,Iterable<String>>,String,String>() {
 				public Iterable<Tuple2<String,String>> call(Tuple2<String,Iterable<String>> x) {
-					int numDocsWithWord = 0;
-					Map<String, String> TEMPMap = new HashMap<String, String>();
-					String word = x._1;
 
+					// Variable to store numDocsWithWord information
+					int numDocsWithWord = 0;
+
+					// x._1 gives the first value in the tuple i.e word
+					String word = x._1;
 					ArrayList<String> docs = new ArrayList<String>();
 
-					for (String doc : x._2){ // Loop over all the Iterable and compute totalWords .
+					// Loop over all the Iterable and compute totalWords and while compouting also store document information
+					for (String doc : x._2){
               numDocsWithWord += 1;
 							docs.add(doc);
           }
 
+					// Iterator to loop through the ArrayList
 					Iterator i = docs.iterator();
           ArrayList ret = new ArrayList();
+
+					// Loop through the Array List and generate the corresponding output type.
           while (i.hasNext()) {
 						   String doc = (String)i.next();
             	 ret.add(new Tuple2(word+"@"+doc, Long.toString(numDocs)+"/"+Long.toString(numDocsWithWord)));
@@ -196,9 +215,9 @@ public class TFICF {
 		JavaPairRDD<String,Double> tfFinalRDD = tfRDD.mapToPair(
 			new PairFunction<Tuple2<String,String>,String,Double>() {
 				public Tuple2<String,Double> call(Tuple2<String,String> x) {
-					double wordCount = Double.parseDouble(x._2.split("/")[0]);
-					double docSize = Double.parseDouble(x._2.split("/")[1]);
-					double TF = Math.log(wordCount/docSize + 1);
+					double wordCount = Double.parseDouble(x._2.split("/")[0]);   // Extract WordCount
+					double docSize = Double.parseDouble(x._2.split("/")[1]);      // Extract Docsize
+					double TF = Math.log(wordCount/docSize + 1);      // Compute TF = log( wordCount/docSize + 1 )
 					return new Tuple2(x._1, TF);
 				}
 			}
@@ -207,18 +226,22 @@ public class TFICF {
 		JavaPairRDD<String,Double> icfFinalRDD = icfRDD.mapToPair(
 			new PairFunction<Tuple2<String,String>,String,Double>() {
 				public Tuple2<String,Double> call(Tuple2<String,String> x) {
-					double numDocs = Double.parseDouble(x._2.split("/")[0]);
-					double numDocsWithWord = Double.parseDouble(x._2.split("/")[1]);
-					double ICF = Math.log((numDocs+1)/(numDocsWithWord+1));
+					double numDocs = Double.parseDouble(x._2.split("/")[0]);     // Extract numDocs
+					double numDocsWithWord = Double.parseDouble(x._2.split("/")[1]);    // Extract numDocsWithWord
+					double ICF = Math.log((numDocs+1)/(numDocsWithWord+1));  // Compute ICF = log((Total numDocs in the corpus + 1) / (numDocsWithWord in the corpus + 1))
 					return new Tuple2(x._1, ICF);
 				}
 			}
 		);
 
+		// Associative Function Which will reduce any set of values using (_*_) op
 		Function2<Double, Double, Double> reduceMultiplyFunc = (tf, icf) -> (tf*icf);
 
+		// Union Creates an Iterable and reduce OP is used to reduce the values by reduceMultiplyFunc op.
 		JavaPairRDD<String,Double> tficfRDD = tfFinalRDD.union(icfFinalRDD).reduceByKey(reduceMultiplyFunc).flatMapToPair(
 			new PairFlatMapFunction<Tuple2<String,Double>,String,Double>() {
+
+				// Trivial Computation to Convert word@document into document@word
 				public Iterable<Tuple2<String,Double>> call(Tuple2<String,Double> x) {
 
 					String[] wordAndDoc = x._1.split("@");
@@ -236,7 +259,6 @@ public class TFICF {
 		// icfFinalRDD.foreach((str) -> System.out.println(str));
 		// System.out.println("-------Contents of tficfRDD-----");
 		// tficfRDD.foreach((str) -> System.out.println(str));
-
 
 		//Print tficfRDD contents in sorted order
 		Map<String, Double> sortedMap = new TreeMap<>();

@@ -1,0 +1,45 @@
+Single Author Info
+vkarri Vivek Reddy Karri
+
+1) TF (Word Count Job + Document Size Job): Gathers all data needed for TF calculation from wordsRDD
+  I've applied a Reduce operation and then followed by a Map Phase
+  A) Reduce Phase:
+     I've used groupByKey() transformation over the wordsRDD.
+     This aggregates all the values for a particular Key and store that as a Iterable
+  B) Map Phase:
+     I didn't have to change the the Keys of the Aggregate transformation and hence opted to use mapValues() transformation.
+     String call(Iterable<Integer> x) method has to be written as the function which is passed into mapValues() transformation.
+     The Method first calculates the WordCount and then returns one value per one key as a string represented by (wordCount/docSize)
+
+2) ICF : Gathers all data needed for ICF calculation from tfRDD
+   This required a map -> reduce -> map chain of transformations
+   A) Map Phase 1: ((word@document) , (wordCount/docSize)) -> (word , (1/document))
+      I've used flatMapToPair() transformation since keys have to be changed, which applied a PairFlatMapFunction() function.
+      The call method of the corresponding transformation takes in a Tuple and the gives out a Iterable (here the iterable will only have one element)
+      The Key word@document is decomposed and returned as (word , (1/document)).
+
+      Reduce Phase:
+      Used groupByKey() to agregate the documents corresponding to a Word.
+
+      Map Phase 2:  (word ,(numDocsWithWord/document1,document2...))   ------->   ((word@document),(numDocs/numDocsWithWord))
+      Since again the keys after this tranformation are different from the input fed keys, flatMapToPair() transformation is used.
+      The function applied in the transformation takes an (String, Iterable<String>) and returns a tuple of Iterable<(String, String)> all the while
+      using the iterable to calcuate numDocsWithWord value.
+
+3) tfFinalRDD : ((word@document) , (wordCount/docSize))  ------>  ((word@document) , TF Score)
+   Since, No changes on the key is required, mapToPair() tranformation is used which returns (word@document, TF Score) of format (String, Double)
+
+4) icfFinalRDD : ((word@document),(numDocs/numDocsWithWord)) -------> ((word@document), ICF Score)
+   This follows the same template as of tfFinalRDD and retuns ICF Score (String, Double)
+
+5) Union & Reduction : (tfFinalRdd union icfFinalRDD) -> reduction -> map -> ((word@document), Tf-ICF
+   A) Union Phase:
+      The Union API in Spark essentially gathers all the Values of a particular matched key between two RDD's into an Iterable.
+   B) Reduction Phase:
+      If everything went correct in the above steps, the Iterable should have two elements, tf and icf. For reduction reduceByKey() is used and the
+      associative function (tf, icf) -> (tf*icf) is passed as the reduction function to the reduceByKey() transformation.
+   C) Map Phase:
+      This is a trivial phase where (word@document) has to be converted into (document@word) and then again flatMapToPair() is used.
+
+Note: groupByKey() is the most flexible of all the data gathering and reduction operations.
+      However, the API says it is slower, so whenever possible used reduceByKey() or other reduction strategies as demonstrated in the Part 5: Example B
