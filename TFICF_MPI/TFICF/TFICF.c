@@ -55,6 +55,7 @@ u_w* unique_words_global;
 
 MPI_Datatype MPI_unique_word_type;
 MPI_Datatype MPI_Result;
+
 // Function to Equal Distribution of Work
 void scheduleIndexes(int rank, int numproc);
 void getUniqueWordsRoot(int rank, int numproc);
@@ -85,6 +86,17 @@ int main(int argc , char *argv[]){
 
 	/* get some information about the host I'm running on */
 	MPI_Get_processor_name(hostname, &len);
+
+	int block_lengths[3] = {32,1,1};
+	MPI_Datatype types[3] = {MPI_CHAR, MPI_INT, MPI_INT};
+	MPI_Aint  offsets[3];
+
+  offsets[0] = offsetof(u_w, word);
+  offsets[1] = offsetof(u_w, numDocsWithWord);
+	offsets[2] = offsetof(u_w, currDoc);
+
+	MPI_Type_create_struct(3, block_lengths, offsets, types, &MPI_unique_word_type);
+	MPI_Type_commit(&MPI_unique_word_type);
 
 	// Important Variables in use
 	DIR* files;
@@ -178,23 +190,10 @@ int main(int argc , char *argv[]){
 			}
 
 			// Print TF job similar to HW4/HW5 (For debugging purposes) (At All other ranks other than 0)
-			// printf("-------------TF Job: Rank %d-------------\n", rank);
-			// for(j=0; j<TF_idx; j++)
-			// 	printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
-			// for(j=0; j<uw_idx; j++)
-			// 		printf("%s , Rank: %d \n", unique_words[j].word, rank);
+			printf("-------------TF Job: Rank %d-------------\n", rank);
+			for(j=0; j<TF_idx; j++)
+				printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
 	}
-
-	int block_lengths[3] = {32,1,1};
-	MPI_Datatype types[3] = {MPI_CHAR, MPI_INT, MPI_INT};
-	MPI_Aint  offsets[3];
-
-  offsets[0] = offsetof(u_w, word);
-  offsets[1] = offsetof(u_w, numDocsWithWord);
-	offsets[2] = offsetof(u_w, currDoc);
-
-	MPI_Type_create_struct(3, block_lengths, offsets, types, &MPI_unique_word_type);
-	MPI_Type_commit(&MPI_unique_word_type);
 
 	unique_words_global = (u_w*)malloc(sizeof(u_w) * numproc * MAX_WORDS_IN_CORPUS);
 	memset(unique_words_global, 0, sizeof(u_w) * numproc * MAX_WORDS_IN_CORPUS);
@@ -376,7 +375,7 @@ void accumulateResults(int rank, int numproc){
 		for (ind = 1; ind<numproc; ind++){
 				totalResults += numRecords[ind];
 				cummulativeValues[ind] = cummulativeValues[ind-1] + numRecords[ind-1];
-				printf("%d, %d, %d, %d \n", ind, totalResults, numRecords[ind], cummulativeValues[ind]);
+				// printf("%d, %d, %d, %d \n", ind, totalResults, numRecords[ind], cummulativeValues[ind]);
 		}
 
 		finalResults = (tficfresult *)malloc(sizeof(tficfresult)*totalResults);
@@ -384,7 +383,7 @@ void accumulateResults(int rank, int numproc){
 		MPI_Request rcvRqstX[numproc-1];
 		MPI_Status rcvStX[numproc-1];
 
-		printf("passed away   \n");
+		// printf("passed away   \n");
 
 		// Open Gates to Get the Results
 		int rk;
