@@ -3,6 +3,7 @@
 #include<stdlib.h>
 #include<dirent.h>
 #include<math.h>
+#include<stddef.h>
 #include "mpi.h"
 
 /* This is the root process */
@@ -17,8 +18,8 @@
 typedef char word_document_str[MAX_STRING_LENGTH];
 
 typedef struct o {
-	char word[MAX_WORDS_IN_CORPUS];
-	char document[MAX_DOCUMENT_NAME_LENGTH];
+	char word[32];
+	char document[8];
 	int wordCount;
 	int docSize;
 	int numDocs;
@@ -26,10 +27,14 @@ typedef struct o {
 } obj;
 
 typedef struct w {
-	char word[MAX_WORDS_IN_CORPUS];
+	char word[32];
 	int numDocsWithWord;
 	int currDoc;
 } u_w;
+
+typedef struct oo {
+	char result[MAX_STRING_LENGTH];
+} tficfresult;
 
 
 // Global Variables
@@ -43,14 +48,18 @@ int TF_idx = 0;
 
 // Will hold all unique words in the corpus and the number of documents with that word
 u_w unique_words[MAX_WORDS_IN_CORPUS];
-int uw_idx = 0;
 
 // Will hold the final strings that will be printed out
 word_document_str strings[MAX_WORDS_IN_CORPUS];
+u_w* unique_words_global;
 
-
+MPI_Datatype MPI_unique_word_type;
+MPI_Datatype MPI_Result;
 // Function to Equal Distribution of Work
 void scheduleIndexes(int rank, int numproc);
+void getUniqueWordsRoot(int rank, int numproc);
+void findICFStats(int rank, int numproc);
+void accumulateResults(int rank, int numproc);
 
 static int myCompare (const void * a, const void * b)
 {
@@ -77,7 +86,6 @@ int main(int argc , char *argv[]){
 	/* get some information about the host I'm running on */
 	MPI_Get_processor_name(hostname, &len);
 
-
 	// Important Variables in use
 	DIR* files;
 	struct dirent* file;
@@ -85,6 +93,7 @@ int main(int argc , char *argv[]){
 	int docSize, contains;
 	char filename[MAX_FILEPATH_LENGTH], word[MAX_WORD_LENGTH], document[MAX_DOCUMENT_NAME_LENGTH];
 
+	int uw_idx = 0;
 	// Count numDocs at Root Node
 	if (rank == ROOT){
 		if((files = opendir("input")) == NULL){
@@ -169,51 +178,83 @@ int main(int argc , char *argv[]){
 			}
 
 			// Print TF job similar to HW4/HW5 (For debugging purposes) (At All other ranks other than 0)
-			printf("-------------TF Job: Rank %d-------------\n", rank);
-			for(j=0; j<TF_idx; j++)
-				printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
-
+			// printf("-------------TF Job: Rank %d-------------\n", rank);
+			// for(j=0; j<TF_idx; j++)
+			// 	printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
+			// for(j=0; j<uw_idx; j++)
+			// 		printf("%s , Rank: %d \n", unique_words[j].word, rank);
 	}
 
+	int block_lengths[3] = {32,1,1};
+	MPI_Datatype types[3] = {MPI_CHAR, MPI_INT, MPI_INT};
+	MPI_Aint  offsets[3];
 
-	free(indexesToProcess);
+  offsets[0] = offsetof(u_w, word);
+  offsets[1] = offsetof(u_w, numDocsWithWord);
+	offsets[2] = offsetof(u_w, currDoc);
 
+	MPI_Type_create_struct(3, block_lengths, offsets, types, &MPI_unique_word_type);
+	MPI_Type_commit(&MPI_unique_word_type);
 
-	// // Use unique_words array to populate TFICF objects with: numDocsWithWord
-	// for(i=0; i<TF_idx; i++) {
-	// 	for(j=0; j<uw_idx; j++) {
-	// 		if(!strcmp(TFICF[i].word, unique_words[j].word)) {
-	// 			TFICF[i].numDocsWithWord = unique_words[j].numDocsWithWord;
-	// 			break;
-	// 		}
-	// 	}
-	// }
-	//
-	//
-	// // Print ICF job similar to HW4/HW5 (For debugging purposes)
-	// printf("------------ICF Job-------------\n");
-	// for(j=0; j<TF_idx; j++)
-	// 	printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].numDocs, TFICF[j].numDocsWithWord);
-	//
-	// // Calculates TFICF value and puts: "document@word\tTFICF" into strings array
-	// for(j=0; j<TF_idx; j++) {
-	// 	double TF = log( 1.0 * TFICF[j].wordCount / TFICF[j].docSize + 1 );
-	// 	double ICF = log(1.0 * (TFICF[j].numDocs + 1) / (TFICF[j].numDocsWithWord + 1) );
-	// 	double TFICF_value = TF * ICF;
-	// 	sprintf(strings[j], "%s@%s\t%.16f", TFICF[j].document, TFICF[j].word, TFICF_value);
-	// }
-	//
-	// // Sort strings and print to file
-	// qsort(strings, TF_idx, sizeof(char)*MAX_STRING_LENGTH, myCompare);
-	// FILE* fp = fopen("output.txt", "w");
-	// if(fp == NULL){
-	// 	printf("Error Opening File: output.txt\n");
-	// 	exit(0);
-	// }
-	// for(i=0; i<TF_idx; i++)
-	// 	fprintf(fp, "%s\n", strings[i]);
-	// fclose(fp);
+	unique_words_global = (u_w*)malloc(sizeof(u_w) * numproc * MAX_WORDS_IN_CORPUS);
+	memset(unique_words_global, 0, sizeof(u_w) * numproc * MAX_WORDS_IN_CORPUS);
 
+	getUniqueWordsRoot(rank, numproc);
+
+	findICFStats(rank, numproc);
+
+	MPI_Barrier(MPI_COMM_WORLD);
+	// Send the Global ICF Information to al the nodes
+	MPI_Bcast(&unique_words, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, ROOT, MPI_COMM_WORLD);
+
+	if (rank != ROOT){
+		for(i=0; i<TF_idx; i++) {
+			for(j=0; j<MAX_WORDS_IN_CORPUS; j++) {
+				if (!strcmp(TFICF[i].word, "") || !strcmp(unique_words[j].word, "")) continue;
+				if(!strcmp(TFICF[i].word, unique_words[j].word)) {
+					TFICF[i].numDocsWithWord = unique_words[j].numDocsWithWord;
+					break;
+				}
+			}
+		}
+
+		// Print ICF job similar to HW4/HW5 (For debugging purposes)
+		printf("------------ICF Job: Rank %d---------\n", rank);
+		for(j=0; j<TF_idx; j++)
+			printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].numDocs, TFICF[j].numDocsWithWord);
+  }
+
+	// Calculates TFICF value and puts: "document@word\tTFICF" into strings array
+	for(j=0; j<TF_idx; j++) {
+		double TF = log( 1.0 * TFICF[j].wordCount / TFICF[j].docSize + 1 );
+		double ICF = log(1.0 * (TFICF[j].numDocs + 1) / (TFICF[j].numDocsWithWord + 1) );
+		double TFICF_value = TF * ICF;
+		sprintf(strings[j], "%s@%s\t%.16f", TFICF[j].document, TFICF[j].word, TFICF_value);
+	}
+
+	accumulateResults(rank, numproc);
+
+	if (rank == ROOT){
+				// Sort strings and print to file
+			qsort(strings, TF_idx, sizeof(char)*MAX_STRING_LENGTH, myCompare);
+			FILE* fp = fopen("output.txt", "w");
+			if(fp == NULL){
+				printf("Error Opening File: output.txt\n");
+				exit(0);
+			}
+			for(i=0; i<TF_idx; i++)
+				fprintf(fp, "%s\n", strings[i]);
+			fclose(fp);
+  }
+
+	if (rank == ROOT){
+		// for (int i=0; i<numproc; ++i) {
+		free(unique_words_global);
+	}
+	else{
+		free(indexesToProcess);
+	}
+	MPI_Finalize();
 	return 0;
 }
 
@@ -229,4 +270,151 @@ void scheduleIndexes(int rank, int numproc){
 			 	 indexesToProcess[ind] = i;
 				 ind++;
 		 }
+}
+
+void getUniqueWordsRoot(int rank, int numproc){
+
+    //Gathering manually
+
+    if(rank == ROOT){
+
+			MPI_Status stSendX;
+			MPI_Request sendRqstX;
+
+			MPI_Request rcvRqstX[numproc];
+			MPI_Status rcvStX[numproc];
+
+			MPI_Isend(unique_words, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, ROOT, 0, MPI_COMM_WORLD, &sendRqstX);
+
+      // Open Gates to Get the Results
+      int rk;
+      for (rk = 0; rk < numproc; rk++){
+          MPI_Irecv(unique_words_global+rk*MAX_WORDS_IN_CORPUS, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, rk, 0, MPI_COMM_WORLD, &rcvRqstX[rk]); // Tag 1 for tempY's
+      }
+
+      //Making wait calls to get all the message and to resend all the messages
+      MPI_Waitall(numproc, rcvRqstX, rcvStX);
+			MPI_Wait(&sendRqstX, &stSendX);
+
+    }
+    else {
+				MPI_Status stSendX;
+				MPI_Request sendRqstX;
+        //if the rank is not zero send unique_words array to root 0
+				MPI_Isend(unique_words, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, ROOT, 0, MPI_COMM_WORLD, &sendRqstX);
+        MPI_Wait(&sendRqstX, &stSendX);
+    }
+}
+
+static int myCompareWords (const void *a, const void *b)
+{
+		u_w* aword = (u_w *)a;
+		u_w* bword = (u_w *)b;
+
+    return -1*strcmp(aword->word, bword->word);
+}
+
+void findICFStats(int rank, int numproc){
+	  if (rank != ROOT) return;
+
+		qsort(unique_words_global, numproc*MAX_WORDS_IN_CORPUS, sizeof(u_w), myCompareWords);
+
+		int limit = numproc*MAX_WORDS_IN_CORPUS;
+		int ind;
+
+
+		// unique_words[uw_idx].numDocsWithWord;
+		int uw_idx = 0;
+		strcpy(unique_words[uw_idx].word, unique_words_global[0].word);
+		unique_words[uw_idx].numDocsWithWord += unique_words_global[0].numDocsWithWord;
+		for (ind = 1; ind < limit; ind++){
+				if (strcmp(unique_words_global[ind].word, "") == 0) break;
+				if (strcmp(unique_words_global[ind].word, unique_words[uw_idx].word) == 0){
+						unique_words[uw_idx].numDocsWithWord += unique_words_global[ind].numDocsWithWord;
+				}
+				else{
+					uw_idx++;
+					strcpy(unique_words[uw_idx].word, unique_words_global[ind].word);
+					unique_words[uw_idx].numDocsWithWord += unique_words_global[ind].numDocsWithWord;
+				}
+		}
+}
+
+void accumulateResults(int rank, int numproc){
+
+	tficfresult* localresults;
+	int *numRecords;
+	int *cummulativeValues;
+	tficfresult* finalResults;
+	int totalResults = 0;
+
+	if (rank == ROOT) {
+			numRecords = (int *)malloc(sizeof(int)*numproc);
+			cummulativeValues = (int *)calloc(numproc, sizeof(int));
+			TF_idx = 0;
+ 	}
+
+	localresults = (tficfresult *)malloc(sizeof(tficfresult)*TF_idx);
+	int j;
+	for(j=0; j<TF_idx; j++){
+		 strcpy(localresults[j].result, strings[j]);
+	}
+
+	MPI_Gather(&TF_idx, 1, MPI_INT, numRecords, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+	int block_lengths[1] = {MAX_STRING_LENGTH};
+	MPI_Datatype types[1] = {MPI_CHAR};
+	MPI_Aint  offsets[1] = {0};
+
+	MPI_Type_create_struct(1, block_lengths, offsets, types, &MPI_Result);
+	MPI_Type_commit(&MPI_Result);
+
+
+	if(rank == ROOT){
+		int ind;
+
+		for (ind = 1; ind<numproc; ind++){
+				totalResults += numRecords[ind];
+				cummulativeValues[ind] = cummulativeValues[ind-1] + numRecords[ind-1];
+				printf("%d, %d, %d, %d \n", ind, totalResults, numRecords[ind], cummulativeValues[ind]);
+		}
+
+		finalResults = (tficfresult *)malloc(sizeof(tficfresult)*totalResults);
+
+		MPI_Request rcvRqstX[numproc-1];
+		MPI_Status rcvStX[numproc-1];
+
+		printf("passed away   \n");
+
+		// Open Gates to Get the Results
+		int rk;
+		for (rk = 1; rk < numproc; rk++){
+				MPI_Irecv(finalResults+cummulativeValues[rk], numRecords[rk], MPI_Result, rk, 0, MPI_COMM_WORLD, &rcvRqstX[rk-1]); // Tag 1 for tempY's
+		}
+		//Making wait calls to get all the message and to resend all the messages
+		MPI_Waitall(numproc-1, rcvRqstX, rcvStX);
+
+	}
+	else {
+			MPI_Status stSendX;
+			MPI_Request sendRqstX;
+			//if the rank is not zero send unique_words array to root 0
+			MPI_Isend(localresults, TF_idx, MPI_Result, ROOT, 0, MPI_COMM_WORLD, &sendRqstX);
+			MPI_Wait(&sendRqstX, &stSendX);
+	}
+
+
+	if (rank == ROOT){
+			int ind;
+			for (ind=0; ind<totalResults; ind++){
+					strcpy(strings[ind], finalResults[ind].result);
+			}
+		free(finalResults);
+		free(numRecords);
+		free(cummulativeValues);
+	}
+
+	free(localresults);
+
+	TF_idx = totalResults;
 }

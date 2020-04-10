@@ -50,7 +50,6 @@ int main(int argc , char *argv[]){
 	// Will hold the final strings that will be printed out
 	word_document_str strings[MAX_WORDS_IN_CORPUS];
 
-
 	//Count numDocs
 	if((files = opendir("input")) == NULL){
 		printf("Directory failed to open\n");
@@ -102,6 +101,8 @@ int main(int argc , char *argv[]){
 				TF_idx++;
 			}
 
+
+
 			contains = 0;
 			// If unique_words array already contains the word, just increment numDocsWithWord
 			for(j=0; j<uw_idx; j++) {
@@ -130,6 +131,8 @@ int main(int argc , char *argv[]){
 	printf("-------------TF Job-------------\n");
 	for(j=0; j<TF_idx; j++)
 		printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
+	// for(j=0; j<uw_idx; j++)
+	// 	printf("%s , Rank: \n", unique_words[j].word);
 
 	// Use unique_words array to populate TFICF objects with: numDocsWithWord
 	for(i=0; i<TF_idx; i++) {
@@ -167,3 +170,32 @@ int main(int argc , char *argv[]){
 
 	return 0;
 }
+
+
+
+
+
+	// int ind;
+	// for (ind = 0; ind < MAX_WORDS_IN_CORPUS; ind++){
+	// // 				// strcpy(unique_words[ind].word, "BULLSHI");
+	// 				printf("----%s----Rank:%d---\n", unique_words[ind].word, rank);
+	// }
+	//
+	// // if (rank == 1){
+	// // 		MPI_Send(unique_words, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, ROOT, 0, MPI_COMM_WORLD);
+	// // }
+	// // if (rank == 0){
+	// // 		MPI_Recv(unique_words, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	// // 		int ind;
+	// // 		for (ind = 0; ind < MAX_WORDS_IN_CORPUS; ind++){
+	// // 				// strcpy(unique_words[ind].word, "BULLSHI");
+	// // 				printf("----%s----Rank:%d---\n", unique_words[ind].word, rank);
+	// // 		}
+	// // }
+
+
+	// if (rank == ROOT){
+	// 	for (i = 0; i < numproc; i++) {
+	// 		 unique_words_global[i] = (u_w *)malloc(sizeof(u_w) * numproc);
+	// 	}
+	// }
