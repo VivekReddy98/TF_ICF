@@ -1,0 +1,49 @@
+/*
+Single Author Info
+vkarri Vivek Reddy Karri
+*/
+
+Q1) Describe your implementation step-by-step. This should include descriptions of what MPI messages get sent/received by which rank, and in what order?
+Ans:  I tried to follow Map-Shuffle-Reduce Approach. The logicn can essentially be broken into three parts.
+
+      A) Local Computation of TF Scores.
+         1) First, numDocs is computed at Rank 0 and is broadcast to all the other ranks.
+                   MPI Communication: MPI_Bcast of numDocs variable.
+         2) Then every node other than rank Zero uses numDocs information to uniformly distribute the work. Work Distribution is defined in scheduleIndexes().
+         3) Then the serial Logic provided for computation of TF Score is used for finding out TF-Scores i.e fill up TFICF array.
+         4) Along with TFICF array, the numDocsWithWord information for unique words extracted in the local computation is also updated in the unique_words array (Shuffle)
+
+      B) Global Computation of ICF Stats for all the words.
+         1) A Custom MPI_Datatype "MPI_unique_word_type" which serializes u_w struct.
+         2) The MPI_Isend, MPI_Irecv and MPI_Wait combination is used to achieve MPI_Gather style accumulation at Rank 0. (Logic: getUniqueWordsRoot)
+                  MPI Communication: MPI_Isend of unique_words array at every node.
+                                     MPI_Irecv to recieve a matrix of size (numpoc-1)*MAX_WORDS_IN_CORPUS sized array at node zero.
+                                     MPI_Waitall and MPI_Wait's for Synchronization.
+         3) Rank Zero uses this information to find out ICF stats for every unique word and stores it in unique_words array of rank 0. (Logic: findICFStats)
+         4) Then Rank Zero Broadcasts this updated unique_words array to all the ranks.
+                  MPI Communication: MPI_Bcast of unique_words array.
+
+      C) Final TF-ICF Computation and Accumulation of final Strings at Root Zero.
+         1) Now that every rank has the global information of numDocsWithWord for every word, the same serial logic is used to compute TF-ICF scores and are stored in strings array.
+         2) A Custom MPI_Datatype "MPI_Result" is created which serializes tficfresult struct which mimics string array.
+         3) The MPI_Isend, MPI_Irecv and MPI_Wait combination is used to achieve MPI_Gather style accumulation at Rank 0. (Logic: accumulateResults)
+                 MPI Communication: MPI_Isend of tficfresult array at every node.
+                                    MPI_Irecv to recieve an array (TotalRecords) sized array at node zero.
+                                    MPI_Waitall and MPI_Wait's for Synchronizationt.
+                 Note: MPI_Gatherv style is used instead of MPI_Gather just to reduce communication overhead because not every worker generates an array of Size MAX_WORDS_IN_CORPUS.
+                       So Essentially instead of a space complexity of (numpoc-1)*MAX_WORDS_IN_CORPUS we now have a space complexity of TotalRecords which is in the worst case of size MAX_WORDS_IN_CORPUS
+        4) The Collected Results are copied onto strings array at Rank Zero and are written to disk.
+
+Q2) Describe how you could add more parallelism to your code so that all of the processors on each MPI node are used instead of only one processor per MPI node?
+Ans: OpenMP/Pthreads can be used to leverage multiple cores for TF Computation (also with some synchronization in place) to achieve more paralellism.
+     Thereby every document could be processed on a different core and Step 1 or Parts of Step 2 could be parallelized more efficiently.
+     The benefits can be seen when large number of documents are assigned to every worker.
+
+Q3) Compare your MPI implementation to the previous MapReduce and Spark implementations of TFICF?
+Ans: 1) MapReduce offloads the intermediate results to file system and thereby reducing communication among nodes whereas in MPI, Communication is the preferred way.
+     2) MPI offers more flexibility over Map Reduce however tough to code, offering multiple design choices and required manual optimization of design for better performance.
+     3) Map_Reduce offers a limitied yet optimized way to do this processing.
+     4) Spark also offers flexibility because it uses in memory structures however, it is limited by the number of transformation and actions.
+     5) No Key-Value Pairs are generated in MPI as of Spark and Map-Reduce.
+     6) MPI seems to be faster but the overhead of communication may lead to diminishing returns when the input scale is increased.
+     7) Finaly, MPI offers more flexibility over Spark and Hadoop but tough to program and optimize.

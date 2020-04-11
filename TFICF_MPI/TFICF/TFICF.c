@@ -1,3 +1,8 @@
+/*
+Single Author Info
+vkarri Vivek Reddy Karri
+*/
+
 #include<stdio.h>
 #include<string.h>
 #include<stdlib.h>
@@ -32,6 +37,8 @@ typedef struct w {
 	int currDoc;
 } u_w;
 
+
+// Final Struct Defined to Transfer Final Strings
 typedef struct oo {
 	char result[MAX_STRING_LENGTH];
 } tficfresult;
@@ -40,7 +47,7 @@ typedef struct oo {
 // Global Variables
 int numDocs;
 int numDocsToProcess; // Number of documents to be Processed by that particular rank
-int *indexesToProcess; // Indexes to Process
+int *indexesToProcess; // Indexes of document names to Process
 
 // Will hold all TFICF objects for asigned documents
 obj TFICF[MAX_WORDS_IN_CORPUS];
@@ -53,15 +60,23 @@ u_w unique_words[MAX_WORDS_IN_CORPUS];
 word_document_str strings[MAX_WORDS_IN_CORPUS];
 u_w* unique_words_global;
 
+// MPI Custom Data Types defined for transferring structs among ranks
 MPI_Datatype MPI_unique_word_type;
 MPI_Datatype MPI_Result;
 
-// Function to Equal Distribution of Work
+// Function for Equal Distribution of Work, called at every other rank except Rank 0.
 void scheduleIndexes(int rank, int numproc);
+
+// Function Declaration to get unique words at the Root node, to compute ICF Scores for every unique word
 void getUniqueWordsRoot(int rank, int numproc);
+
+// Function used at Root Node to find out ICF Values
 void findICFStats(int rank, int numproc);
+
+// Function to accumulate results back at Root Zero and print them back to a file.
 void accumulateResults(int rank, int numproc);
 
+// Comparison function between Strings used for qsort()
 static int myCompare (const void * a, const void * b)
 {
     return strcmp (a, b);
@@ -87,6 +102,8 @@ int main(int argc , char *argv[]){
 	/* get some information about the host I'm running on */
 	MPI_Get_processor_name(hostname, &len);
 
+
+	/* -----------------------------------------------Creating a Custom MPI Datatype ------------------------------------- */
 	int block_lengths[3] = {32,1,1};
 	MPI_Datatype types[3] = {MPI_CHAR, MPI_INT, MPI_INT};
 	MPI_Aint  offsets[3];
@@ -97,6 +114,8 @@ int main(int argc , char *argv[]){
 
 	MPI_Type_create_struct(3, block_lengths, offsets, types, &MPI_unique_word_type);
 	MPI_Type_commit(&MPI_unique_word_type);
+	/* -----------------------------------------------Creating a Custom MPI Datatype ------------------------------------- */
+
 
 	// Important Variables in use
 	DIR* files;
@@ -108,22 +127,24 @@ int main(int argc , char *argv[]){
 	int uw_idx = 0;
 	// Count numDocs at Root Node
 	if (rank == ROOT){
-		if((files = opendir("input")) == NULL){
-			printf("Directory failed to open\n");
-			exit(1);
-		}
-		while((file = readdir(files))!= NULL){
-			// On linux/Unix we don't want current and parent directories
-			if(!strcmp(file->d_name, "."))	 continue;
-			if(!strcmp(file->d_name, "..")) continue;
-			numDocs++;
-		}
+			if((files = opendir("input")) == NULL){
+				printf("Directory failed to open\n");
+				exit(1);
+			}
+			while((file = readdir(files))!= NULL){
+				// On linux/Unix we don't want current and parent directories
+				if(!strcmp(file->d_name, "."))	 continue;
+				if(!strcmp(file->d_name, "..")) continue;
+				numDocs++; // Finding numDocs.
+			}
 	}
 
-	// Get numDocs Information from Root 0
+	// BroadCast numDocs Inforation to all the Nodes.
 	MPI_Bcast(&numDocs, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
 	if (rank != ROOT){
+
+		  // Distributes Work across nodes and indexesToProcess array to store the indexes of the document to process.
 			scheduleIndexes(rank, numproc);
 
 			// Loop through each assigned document and gather TFICF variables for each word
@@ -195,17 +216,22 @@ int main(int argc , char *argv[]){
 				printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
 	}
 
+	// unique_words_global matrix of size numproc*MAX_WORDS_IN_CORPUS
 	unique_words_global = (u_w*)malloc(sizeof(u_w) * numproc * MAX_WORDS_IN_CORPUS);
 	memset(unique_words_global, 0, sizeof(u_w) * numproc * MAX_WORDS_IN_CORPUS);
 
+	// Accumulate results at Root Node
 	getUniqueWordsRoot(rank, numproc);
 
+	// Find out ICF stats at Root Node
 	findICFStats(rank, numproc);
 
 	MPI_Barrier(MPI_COMM_WORLD);
-	// Send the Global ICF Information to al the nodes
+
+	// Send the Global ICF Array Information to all the nodes.
 	MPI_Bcast(&unique_words, MAX_WORDS_IN_CORPUS, MPI_unique_word_type, ROOT, MPI_COMM_WORLD);
 
+	// Finding TFICF information at all the local nodes
 	if (rank != ROOT){
 		for(i=0; i<TF_idx; i++) {
 			for(j=0; j<MAX_WORDS_IN_CORPUS; j++) {
@@ -228,11 +254,15 @@ int main(int argc , char *argv[]){
 		double TF = log( 1.0 * TFICF[j].wordCount / TFICF[j].docSize + 1 );
 		double ICF = log(1.0 * (TFICF[j].numDocs + 1) / (TFICF[j].numDocsWithWord + 1) );
 		double TFICF_value = TF * ICF;
+
+		// Copy the Computed Strings into the string array.
 		sprintf(strings[j], "%s@%s\t%.16f", TFICF[j].document, TFICF[j].word, TFICF_value);
 	}
 
+	// Accumulate the Results at Root Zero.
 	accumulateResults(rank, numproc);
 
+	// Writes the text back to the file system.
 	if (rank == ROOT){
 				// Sort strings and print to file
 			qsort(strings, TF_idx, sizeof(char)*MAX_STRING_LENGTH, myCompare);
@@ -246,6 +276,7 @@ int main(int argc , char *argv[]){
 			fclose(fp);
   }
 
+	// Free the allocated servers
 	if (rank == ROOT){
 		// for (int i=0; i<numproc; ++i) {
 		free(unique_words_global);
@@ -253,6 +284,8 @@ int main(int argc , char *argv[]){
 	else{
 		free(indexesToProcess);
 	}
+
+	// Close the MPI Communication.
 	MPI_Finalize();
 	return 0;
 }
@@ -307,6 +340,7 @@ void getUniqueWordsRoot(int rank, int numproc){
 
 static int myCompareWords (const void *a, const void *b)
 {
+	  // Comparison function for sorting
 		u_w* aword = (u_w *)a;
 		u_w* bword = (u_w *)b;
 
@@ -316,11 +350,12 @@ static int myCompareWords (const void *a, const void *b)
 void findICFStats(int rank, int numproc){
 	  if (rank != ROOT) return;
 
+		// qsort() to sort the indexes.
 		qsort(unique_words_global, numproc*MAX_WORDS_IN_CORPUS, sizeof(u_w), myCompareWords);
+
 
 		int limit = numproc*MAX_WORDS_IN_CORPUS;
 		int ind;
-
 
 		// unique_words[uw_idx].numDocsWithWord;
 		int uw_idx = 0;
@@ -337,16 +372,20 @@ void findICFStats(int rank, int numproc){
 					unique_words[uw_idx].numDocsWithWord += unique_words_global[ind].numDocsWithWord;
 				}
 		}
+
+		// Find the ICF stats and store them in unique_words array.
 }
 
 void accumulateResults(int rank, int numproc){
 
+	// Create pointers to dynamically allocated arrays.
 	tficfresult* localresults;
 	int *numRecords;
 	int *cummulativeValues;
 	tficfresult* finalResults;
 	int totalResults = 0;
 
+	// Allocate Memory to pointers
 	if (rank == ROOT) {
 			numRecords = (int *)malloc(sizeof(int)*numproc);
 			cummulativeValues = (int *)calloc(numproc, sizeof(int));
@@ -354,11 +393,14 @@ void accumulateResults(int rank, int numproc){
  	}
 
 	localresults = (tficfresult *)malloc(sizeof(tficfresult)*TF_idx);
+
+	// Copy results into localresults array.
 	int j;
 	for(j=0; j<TF_idx; j++){
 		 strcpy(localresults[j].result, strings[j]);
 	}
 
+	/* -----------------------------------------------Creating a Custom MPI Datatype ------------------------------------- */
 	MPI_Gather(&TF_idx, 1, MPI_INT, numRecords, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
 	int block_lengths[1] = {MAX_STRING_LENGTH};
@@ -367,8 +409,9 @@ void accumulateResults(int rank, int numproc){
 
 	MPI_Type_create_struct(1, block_lengths, offsets, types, &MPI_Result);
 	MPI_Type_commit(&MPI_Result);
+	/* -----------------------------------------------Creating a Custom MPI Datatype ------------------------------------- */
 
-
+	// MPI_Gatherv style communication to gather results from different nodes and different sized vectors
 	if(rank == ROOT){
 		int ind;
 
@@ -402,7 +445,7 @@ void accumulateResults(int rank, int numproc){
 			MPI_Wait(&sendRqstX, &stSendX);
 	}
 
-
+	// Free Resources
 	if (rank == ROOT){
 			int ind;
 			for (ind=0; ind<totalResults; ind++){
@@ -414,6 +457,6 @@ void accumulateResults(int rank, int numproc){
 	}
 
 	free(localresults);
-
+	
 	TF_idx = totalResults;
 }
