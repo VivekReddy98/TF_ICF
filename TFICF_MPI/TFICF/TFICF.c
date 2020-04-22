@@ -211,9 +211,9 @@ int main(int argc , char *argv[]){
 			}
 
 			// Print TF job similar to HW4/HW5 (For debugging purposes) (At All other ranks other than 0)
-			printf("-------------TF Job: Rank %d-------------\n", rank);
-			for(j=0; j<TF_idx; j++)
-				printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
+			// printf("-------------TF Job: Rank %d-------------\n", rank);
+			// for(j=0; j<TF_idx; j++)
+			// 	printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].wordCount, TFICF[j].docSize);
 	}
 
 	// unique_words_global matrix of size numproc*MAX_WORDS_IN_CORPUS
@@ -244,9 +244,9 @@ int main(int argc , char *argv[]){
 		}
 
 		// Print ICF job similar to HW4/HW5 (For debugging purposes)
-		printf("------------ICF Job: Rank %d---------\n", rank);
-		for(j=0; j<TF_idx; j++)
-			printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].numDocs, TFICF[j].numDocsWithWord);
+		// printf("------------ICF Job: Rank %d---------\n", rank);
+		// for(j=0; j<TF_idx; j++)
+		// 	printf("%s@%s\t%d/%d\n", TFICF[j].word, TFICF[j].document, TFICF[j].numDocs, TFICF[j].numDocsWithWord);
   }
 
 	// Calculates TFICF value and puts: "document@word\tTFICF" into strings array
@@ -457,6 +457,6 @@ void accumulateResults(int rank, int numproc){
 	}
 
 	free(localresults);
-	
+
 	TF_idx = totalResults;
 }
